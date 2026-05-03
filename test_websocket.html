@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BobShare Pro - WebSocket Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input, button {
+            padding: 10px;
+            font-size: 14px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        input {
+            width: calc(100% - 22px);
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        #messages {
+            border: 1px solid #ddd;
+            padding: 15px;
+            height: 300px;
+            overflow-y: auto;
+            margin: 20px 0;
+            background-color: #fafafa;
+            border-radius: 4px;
+        }
+        .message {
+            margin-bottom: 10px;
+            padding: 8px;
+            border-radius: 4px;
+            background-color: white;
+        }
+        .message.sent {
+            background-color: #e3f2fd;
+            text-align: right;
+        }
+        .message.received {
+            background-color: #f1f8e9;
+        }
+        .message .sender {
+            font-weight: bold;
+            color: #333;
+        }
+        .message .time {
+            font-size: 11px;
+            color: #999;
+            margin-left: 10px;
+        }
+        .status {
+            padding: 10px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .status.connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .status.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .info {
+            background-color: #d1ecf1;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            border-left: 4px solid #0c5460;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔒 BobShare Pro - Private WebSocket Chat</h1>
+        
+        <div class="info">
+            <strong>Test Instructions:</strong><br>
+            1. Enter your User ID (1 or 2 for sample users)<br>
+            2. Enter Room ID (format: user1_user2_toolid, e.g., "1_2_1")<br>
+            3. Click Connect to join the private room<br>
+            4. Open this page in another tab with a different user ID to test chat
+        </div>
+
+        <div id="status" class="status disconnected">Disconnected</div>
+
+        <div class="input-group">
+            <label for="userId">Your User ID:</label>
+            <input type="number" id="userId" placeholder="Enter your user ID (e.g., 1)" value="1">
+        </div>
+
+        <div class="input-group">
+            <label for="roomId">Room ID:</label>
+            <input type="text" id="roomId" placeholder="Enter room ID (e.g., 1_2_1)" value="1_2_1">
+        </div>
+
+        <div class="input-group">
+            <button id="connectBtn" onclick="connect()">Connect</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+            <button onclick="loadHistory()">Load History</button>
+        </div>
+
+        <div id="messages"></div>
+
+        <div class="input-group">
+            <label for="messageInput">Message:</label>
+            <input type="text" id="messageInput" placeholder="Type your message..." disabled>
+            <button id="sendBtn" onclick="sendMessage()" disabled>Send</button>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let currentUserId = null;
+        let currentRoomId = null;
+
+        function connect() {
+            const userId = document.getElementById('userId').value;
+            const roomId = document.getElementById('roomId').value;
+
+            if (!userId || !roomId) {
+                alert('Please enter both User ID and Room ID');
+                return;
+            }
+
+            currentUserId = parseInt(userId);
+            currentRoomId = roomId;
+
+            // Connect to WebSocket
+            const wsUrl = `ws://localhost:8001/ws/${roomId}?user_id=${userId}`;
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function(event) {
+                console.log('WebSocket connected');
+                updateStatus('connected');
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('disconnectBtn').disabled = false;
+                document.getElementById('messageInput').disabled = false;
+                document.getElementById('sendBtn').disabled = false;
+            };
+
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                console.log('Received:', data);
+                
+                if (data.type === 'connection') {
+                    addSystemMessage(data.message);
+                } else if (data.type === 'message') {
+                    addMessage(data);
+                } else if (data.type === 'error') {
+                    addSystemMessage('Error: ' + data.message, true);
+                }
+            };
+
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                addSystemMessage('Connection error occurred', true);
+            };
+
+            ws.onclose = function(event) {
+                console.log('WebSocket closed:', event.code, event.reason);
+                updateStatus('disconnected');
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+                document.getElementById('messageInput').disabled = true;
+                document.getElementById('sendBtn').disabled = true;
+                
+                if (event.code === 4003) {
+                    addSystemMessage('Connection closed: ' + event.reason, true);
+                }
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+
+            if (!message) {
+                return;
+            }
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    message: message,
+                    user_id: currentUserId
+                }));
+                input.value = '';
+            } else {
+                alert('Not connected to WebSocket');
+            }
+        }
+
+        function addMessage(data) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message ' + (data.sender_id === currentUserId ? 'sent' : 'received');
+            
+            const time = new Date(data.timestamp).toLocaleTimeString();
+            messageDiv.innerHTML = `
+                <span class="sender">${data.sender_name}:</span> ${data.message}
+                <span class="time">${time}</span>
+            `;
+            
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function addSystemMessage(message, isError = false) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message';
+            messageDiv.style.backgroundColor = isError ? '#ffebee' : '#e8f5e9';
+            messageDiv.style.fontStyle = 'italic';
+            messageDiv.textContent = message;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function updateStatus(status) {
+            const statusDiv = document.getElementById('status');
+            if (status === 'connected') {
+                statusDiv.textContent = 'Connected to room: ' + currentRoomId;
+                statusDiv.className = 'status connected';
+            } else {
+                statusDiv.textContent = 'Disconnected';
+                statusDiv.className = 'status disconnected';
+            }
+        }
+
+        async function loadHistory() {
+            const userId = document.getElementById('userId').value;
+            const roomId = document.getElementById('roomId').value;
+
+            if (!userId || !roomId) {
+                alert('Please enter both User ID and Room ID');
+                return;
+            }
+
+            try {
+                const response = await fetch(`http://localhost:8001/api/chat/history/${roomId}?user_id=${userId}`);
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    alert('Error loading history: ' + error.detail);
+                    return;
+                }
+
+                const messages = await response.json();
+                const messagesDiv = document.getElementById('messages');
+                messagesDiv.innerHTML = '';
+
+                if (messages.length === 0) {
+                    addSystemMessage('No message history for this room');
+                } else {
+                    messages.forEach(msg => addMessage(msg));
+                    addSystemMessage(`Loaded ${messages.length} messages from history`);
+                }
+            } catch (error) {
+                console.error('Error loading history:', error);
+                alert('Failed to load history: ' + error.message);
+            }
+        }
+
+        // Allow Enter key to send message
+        document.getElementById('messageInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>
